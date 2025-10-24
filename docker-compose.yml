@@ -29,7 +29,7 @@ services:
 
   # Backend API Service
   backend:
-    image: vouu/nginx-waf-backend:ubuntu-based-latest
+    image: vouu/nginx-waf-backend:ubuntu2404
     restart: unless-stopped
     container_name: nginx-love-backend
     # network_mode: host
@@ -75,7 +75,7 @@ services:
       SMTP_USER: ${SMTP_USER:-user@example.com}
       SMTP_PASS: ${SMTP_PASS:-change-this-to-random-password}
     volumes:
-      - backup:/var/backup
+      - backup:/var/backups
       - nginx_modules:/usr/lib/nginx
       - nginx_conf:/etc/nginx
       - nginx_logs:/var/log

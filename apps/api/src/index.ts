@@ -11,10 +11,12 @@ import { initializeNginxForSSL } from './utils/nginx-setup';
 import { modSecSetupService } from './domains/modsec/services/modsec-setup.service';
 import { startAlertMonitoring, stopAlertMonitoring } from './domains/alerts/services/alert-monitoring.service';
 import { startSlaveNodeStatusCheck, stopSlaveNodeStatusCheck } from './domains/cluster/services/slave-status-checker.service';
+import { backupSchedulerService } from './domains/backup/services/backup-scheduler.service';
 
 const app: Application = express();
 let monitoringTimer: NodeJS.Timeout | null = null;
 let slaveStatusTimer: NodeJS.Timeout | null = null;
+let backupSchedulerTimer: NodeJS.Timeout | null = null;
 
 // Security middleware
 // app.use(helmet());
@@ -59,7 +61,7 @@ modSecSetupService.initializeModSecurityConfig().catch((error) => {
   logger.warn('CRS rule management features may not work properly.');
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   logger.info(`🚀 Server running on port ${PORT} in ${config.nodeEnv} mode`);
   logger.info(`📡 CORS enabled for: ${config.cors.origin}`);
   
@@ -69,6 +71,15 @@ const server = app.listen(PORT, () => {
   
   // Start slave node status checker (check every minute)
   slaveStatusTimer = startSlaveNodeStatusCheck();
+  
+  // Initialize and start backup scheduler (check every minute)
+  try {
+    await backupSchedulerService.initializeSchedules();
+    backupSchedulerTimer = backupSchedulerService.start(60000);
+    logger.info('📦 Backup scheduler initialized and started');
+  } catch (error) {
+    logger.error('Failed to start backup scheduler:', error);
+  }
 });
 
 // Graceful shutdown
@@ -79,6 +90,9 @@ process.on('SIGTERM', () => {
   }
   if (slaveStatusTimer) {
     stopSlaveNodeStatusCheck(slaveStatusTimer);
+  }
+  if (backupSchedulerTimer) {
+    backupSchedulerService.stop(backupSchedulerTimer);
   }
   server.close(() => {
     logger.info('HTTP server closed');
@@ -93,6 +107,9 @@ process.on('SIGINT', () => {
   }
   if (slaveStatusTimer) {
     stopSlaveNodeStatusCheck(slaveStatusTimer);
+  }
+  if (backupSchedulerTimer) {
+    backupSchedulerService.stop(backupSchedulerTimer);
   }
   server.close(() => {
     logger.info('HTTP server closed');
