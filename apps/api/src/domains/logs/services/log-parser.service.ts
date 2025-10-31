@@ -123,21 +123,29 @@ export function parseModSecLogLine(line: string, index: number): ParsedLogEntry 
     // ModSecurity logs are complex, extract key info
     if (!line.includes('ModSecurity:')) return null;
 
-    // Extract timestamp if present
+    // Extract timestamp - supports both nginx error log and ModSec audit log formats
     let timestamp = new Date().toISOString();
-    const timeMatch = line.match(/\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2})/);
-    if (timeMatch) {
-      const [, timeStr] = timeMatch;
-      // Parse: 29/Mar/2025:14:35:22
-      const timeParts = timeStr.match(/(\d+)\/(\w+)\/(\d+):(\d+):(\d+):(\d+)/);
-      if (timeParts) {
-        const [, day, monthStr, year, hour, min, sec] = timeParts;
-        const months: { [key: string]: string } = {
-          Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
-          Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12'
-        };
-        const month = months[monthStr] || '01';
-        timestamp = `${year}-${month}-${day.padStart(2, '0')}T${hour}:${min}:${sec}Z`;
+    
+    // Try nginx error log format first: 2025/10/24 06:22:01
+    const nginxTimeMatch = line.match(/^(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+    if (nginxTimeMatch) {
+      const [, year, month, day, hour, min, sec] = nginxTimeMatch;
+      timestamp = `${year}-${month}-${day}T${hour}:${min}:${sec}Z`;
+    } else {
+      // Try ModSec audit log format: [29/Mar/2025:14:35:22]
+      const auditTimeMatch = line.match(/\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2})/);
+      if (auditTimeMatch) {
+        const [, timeStr] = auditTimeMatch;
+        const timeParts = timeStr.match(/(\d+)\/(\w+)\/(\d+):(\d+):(\d+):(\d+)/);
+        if (timeParts) {
+          const [, day, monthStr, year, hour, min, sec] = timeParts;
+          const months: { [key: string]: string } = {
+            Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+            Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12'
+          };
+          const month = months[monthStr] || '01';
+          timestamp = `${year}-${month}-${day.padStart(2, '0')}T${hour}:${min}:${sec}Z`;
+        }
       }
     }
 
@@ -160,10 +168,13 @@ export function parseModSecLogLine(line: string, index: number): ParsedLogEntry 
       tags.push(match[1]);
     }
 
-    // Extract IP - from [client 52.186.182.85] or [hostname "10.0.0.203"]
-    const clientIpMatch = line.match(/\[client ([\d.]+)\]/);
+    // Extract client IP - from [client 52.186.182.85]
+    const clientIpMatch = line.match(/\[client ([\d.]+)(?::\d+)?\]/);
+    const ip = clientIpMatch ? clientIpMatch[1] : undefined;
+    
+    // Extract hostname/domain separately - from [hostname "domain.com"]
     const hostnameMatch = line.match(/\[hostname "([^"]+)"\]/);
-    const ip = clientIpMatch ? clientIpMatch[1] : (hostnameMatch ? hostnameMatch[1] : undefined);
+    const hostname = hostnameMatch ? hostnameMatch[1] : undefined;
 
     // Extract URI - [uri "/device.rsp"]
     const uriMatch = line.match(/\[uri "([^"]+)"\]/);
@@ -214,6 +225,8 @@ export function parseModSecLogLine(line: string, index: number): ParsedLogEntry 
       message: `ModSecurity: ${message}`,
       fullMessage, // Complete log without truncation
       ip,
+      domain: hostname, // Use domain field for consistency with nginx logs
+      hostname, // Keep hostname for backward compatibility
       method,
       path,
       statusCode,
