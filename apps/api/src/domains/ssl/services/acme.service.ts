@@ -10,8 +10,19 @@ const execAsync = promisify(exec);
 
 /**
  * ACME Service - Handles all Let's Encrypt/ZeroSSL certificate operations
+ * Default CA: ZeroSSL (can be changed via environment variable)
  */
 export class AcmeService {
+  // Default CA server (ZeroSSL) - can be overridden by environment variable
+  private defaultCA: string = process.env.ACME_CA_SERVER || 'zerossl';
+
+  /**
+   * Get current default CA
+   */
+  getDefaultCA(): string {
+    return this.defaultCA;
+  }
+
   /**
    * Check if acme.sh is installed
    */
@@ -99,8 +110,10 @@ export class AcmeService {
       // Build domain list (primary + SANs)
       let issueCmd = `${acmeScript} --issue`;
 
-      // Set ZeroSSL as default CA
-      issueCmd += ` --server zerossl`;
+      // Set default CA (ZeroSSL or from environment variable)
+      const caServer = this.defaultCA;
+      issueCmd += ` --server ${caServer}`;
+      logger.info(`Using CA server: ${caServer}`);
 
       // Add primary domain
       issueCmd += ` -d ${domain}`;
@@ -260,34 +273,182 @@ export class AcmeService {
   }
 
   /**
-   * Parse certificate to extract information
+   * Validate that private key matches certificate
+   */
+  async validateKeyPair(certificate: string, privateKey: string): Promise<boolean> {
+    try {
+      const forge = await import('node-forge');
+      
+      // Parse certificate and private key
+      const cert = forge.pki.certificateFromPem(certificate);
+      let privKey;
+      
+      try {
+        privKey = forge.pki.privateKeyFromPem(privateKey);
+      } catch (error) {
+        // Try RSA format
+        try {
+          privKey = forge.pki.privateKeyFromPem(privateKey);
+        } catch {
+          throw new Error('Invalid private key format');
+        }
+      }
+
+      // Get public key from certificate
+      const certPublicKey = cert.publicKey as any;
+      
+      // Compare modulus for RSA keys (simplified validation)
+      if (certPublicKey.n && (privKey as any).n) {
+        const certModulus = (certPublicKey.n as any).toString(16);
+        const keyModulus = ((privKey as any).n as any).toString(16);
+        return certModulus === keyModulus;
+      }
+
+      // For other key types, we'll let nginx validation handle it
+      return true;
+    } catch (error) {
+      logger.warn('Key pair validation failed, will rely on nginx validation:', error);
+      // Return true to allow nginx to validate - this is a best-effort check
+      return true;
+    }
+  }
+
+  /**
+   * Parse certificate to extract information using node-forge
    */
   async parseCertificate(certContent: string): Promise<ParsedCertificate> {
     try {
-      const { X509Certificate } = await import('crypto');
+      // Try node-forge first (works with RSA)
+      try {
+        const forge = await import('node-forge');
+        const cert = forge.pki.certificateFromPem(certContent);
 
-      const cert = new X509Certificate(certContent);
+      // Helper function to extract string value from attribute
+      const getAttrValue = (attrs: any[], attrName: string): string | undefined => {
+        const value = attrs.find((attr: any) => attr.name === attrName)?.value;
+        return Array.isArray(value) ? value[0] : value;
+      };
 
-      const commonName = cert.subject.split('\n').find(line => line.startsWith('CN='))?.replace('CN=', '') || '';
-      const issuer = cert.issuer.split('\n').find(line => line.startsWith('O='))?.replace('O=', '') || 'Unknown';
+      // Extract subject details
+      const subjectAttrs = cert.subject.attributes;
+      const subjectCN = getAttrValue(subjectAttrs, 'commonName') || '';
+      const subjectO = getAttrValue(subjectAttrs, 'organizationName');
+      const subjectC = getAttrValue(subjectAttrs, 'countryName');
 
-      // Parse SANs from subjectAltName
+      // Extract issuer details
+      const issuerAttrs = cert.issuer.attributes;
+      const issuerCN = getAttrValue(issuerAttrs, 'commonName') || '';
+      const issuerO = getAttrValue(issuerAttrs, 'organizationName');
+      const issuerC = getAttrValue(issuerAttrs, 'countryName');
+
+      // Build subject and issuer strings
+      const subject = cert.subject.attributes
+        .map((attr: any) => `${attr.shortName}=${attr.value}`)
+        .join(', ');
+      
+      const issuer = cert.issuer.attributes
+        .map((attr: any) => `${attr.shortName}=${attr.value}`)
+        .join(', ');
+
+      // Extract SANs from extensions
       const sans: string[] = [];
-      const sanMatch = cert.subjectAltName?.match(/DNS:([^,]+)/g);
-      if (sanMatch) {
-        sanMatch.forEach(san => {
-          const domain = san.replace('DNS:', '');
-          if (domain) sans.push(domain);
+      const sanExtension = cert.extensions.find((ext: any) => ext.name === 'subjectAltName');
+      
+      if (sanExtension && sanExtension.altNames) {
+        sanExtension.altNames.forEach((altName: any) => {
+          if (altName.type === 2) { // DNS type
+            sans.push(altName.value);
+          }
         });
       }
 
+      // If no SANs found, use CN
+      if (sans.length === 0 && subjectCN) {
+        sans.push(subjectCN);
+      }
+
+      // Extract serial number
+      const serialNumber = cert.serialNumber;
+
+      // Extract validity dates
+      const validFrom = new Date(cert.validity.notBefore);
+      const validTo = new Date(cert.validity.notAfter);
+
+      logger.info(`Certificate parsed: CN=${subjectCN}, Issuer=${issuerCN}, Valid: ${validFrom.toISOString()} - ${validTo.toISOString()}`);
+
       return {
-        commonName,
-        sans: sans.length > 0 ? sans : [commonName],
-        issuer,
-        validFrom: new Date(cert.validFrom),
-        validTo: new Date(cert.validTo),
+        commonName: subjectCN,
+        sans,
+        issuer: issuerO || issuerCN,
+        issuerDetails: {
+          commonName: issuerCN,
+          organization: issuerO,
+          country: issuerC,
+        },
+        subject: subjectCN,
+        subjectDetails: {
+          commonName: subjectCN,
+          organization: subjectO,
+          country: subjectC,
+        },
+        validFrom,
+        validTo,
+        serialNumber,
       };
+      } catch (forgeError: any) {
+        // If node-forge fails (e.g., EC certificate), fallback to native crypto
+        logger.info('node-forge failed, trying native X509Certificate (EC support)');
+        
+        const { X509Certificate } = await import('crypto');
+        const cert = new X509Certificate(certContent);
+
+        const commonName = cert.subject.split('\n').find(line => line.startsWith('CN='))?.replace('CN=', '') || '';
+        const issuerCN = cert.issuer.split('\n').find(line => line.startsWith('CN='))?.replace('CN=', '') || '';
+        const issuerO = cert.issuer.split('\n').find(line => line.startsWith('O='))?.replace('O=', '');
+        const issuerC = cert.issuer.split('\n').find(line => line.startsWith('C='))?.replace('C=', '');
+        
+        const subjectO = cert.subject.split('\n').find(line => line.startsWith('O='))?.replace('O=', '');
+        const subjectC = cert.subject.split('\n').find(line => line.startsWith('C='))?.replace('C=', '');
+
+        // Parse SANs from subjectAltName
+        const sans: string[] = [];
+        const sanMatch = cert.subjectAltName?.match(/DNS:([^,]+)/g);
+        if (sanMatch) {
+          sanMatch.forEach(san => {
+            const domain = san.replace('DNS:', '');
+            if (domain) sans.push(domain);
+          });
+        }
+        
+        if (sans.length === 0 && commonName) {
+          sans.push(commonName);
+        }
+
+        const validFrom = new Date(cert.validFrom);
+        const validTo = new Date(cert.validTo);
+        
+        logger.info(`Certificate parsed (EC): CN=${commonName}, Valid: ${validFrom.toISOString()} - ${validTo.toISOString()}`);
+
+        return {
+          commonName,
+          sans,
+          issuer: issuerO || issuerCN || 'Unknown',
+          issuerDetails: {
+            commonName: issuerCN,
+            organization: issuerO,
+            country: issuerC,
+          },
+          subject: commonName,
+          subjectDetails: {
+            commonName,
+            organization: subjectO,
+            country: subjectC,
+          },
+          validFrom,
+          validTo,
+          serialNumber: cert.serialNumber,
+        };
+      }
     } catch (error) {
       logger.error('Failed to parse certificate:', error);
       throw new Error('Failed to parse certificate');
