@@ -69,29 +69,6 @@ git pull
 bash scripts/update.sh
 ```
 
-### 🖥️ Production Upgrade Deployment (Upgrade New Version for docker compose)
-
-**⚠️ Important Notice:**
-
-Currently, automatic upgrades are **not supported** for Docker Compose deployments. You must perform manual upgrades following the steps below.
-
-**Before upgrading, please note:**
-
-- ⏱️ **Downtime Expected**: Your services will be temporarily unavailable during the upgrade process
-- 💾 **Backup Required**: Always backup your database and configuration files before upgrading
-- 🔧 **Manual Process**: You need to manually pull updates and rebuild containers
-- 🚧 **Work in Progress**: Our team is actively developing an automated upgrade tool to make this process safer and easier
-
-**Estimated Downtime:** 5-15 minutes depending on your server specifications.
-
-**Coming Soon:** Our team is developing a safe upgrade utility that will:
-- ✅ Automated backup before upgrade
-- ✅ Zero-downtime rolling updates
-- ✅ Automatic rollback on failure
-- ✅ Configuration migration assistance
-
-**Need help?** Join our [Telegram Support](https://t.me/nginxlove) for upgrade assistance.
-
 ### 🖥️ Production Deployment (Docker container)
 
 ## Environment Setup
@@ -140,6 +117,29 @@ bash docker/scripts/docker.sh
 docker-compose build && docker-compose up -d
 
 ```
+
+### 🖥️ Production Upgrade Deployment (Upgrade New Version for docker compose)
+
+**⚠️ Important Notice:**
+
+Currently, automatic upgrades are **not supported** for Docker Compose deployments. You must perform manual upgrades following the steps below.
+
+**Before upgrading, please note:**
+
+- ⏱️ **Downtime Expected**: Your services will be temporarily unavailable during the upgrade process
+- 💾 **Backup Required**: Always backup your database and configuration files before upgrading
+- 🔧 **Manual Process**: You need to manually pull updates and rebuild containers
+- 🚧 **Work in Progress**: Our team is actively developing an automated upgrade tool to make this process safer and easier
+
+**Estimated Downtime:** 5-15 minutes depending on your server specifications.
+
+**Coming Soon:** Our team is developing a safe upgrade utility that will:
+- ✅ Automated backup before upgrade
+- ✅ Zero-downtime rolling updates
+- ✅ Automatic rollback on failure
+- ✅ Configuration migration assistance
+
+**Need help?** Join our [Telegram Support](https://t.me/nginxlove) for upgrade assistance.
 
 
 
