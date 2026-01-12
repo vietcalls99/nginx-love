@@ -53,6 +53,7 @@ export interface AdvancedConfigData {
   hstsEnabled?: boolean; // Enable HSTS header
   http2Enabled?: boolean; // Enable HTTP/2
   grpcEnabled?: boolean; // Enable gRPC support (default proxy_pass replacement)
+  clientMaxBodySize?: number; // Maximum request body size in MB (default: 100)
   customLocations?: CustomLocationData[]; // Custom location blocks
 }
 
@@ -64,6 +65,8 @@ export interface CreateDomainInput {
   modsecEnabled?: boolean;
   realIpConfig?: RealIpConfigData;
   advancedConfig?: AdvancedConfigData;
+  autoCreateSSL?: boolean; // Auto-create SSL certificate after domain creation
+  sslEmail?: string; // Email for SSL certificate (Let's Encrypt/ZeroSSL)
 }
 
 // Domain update input
@@ -71,6 +74,8 @@ export interface UpdateDomainInput {
   name?: string;
   status?: string;
   modsecEnabled?: boolean;
+  sslEnabled?: boolean;
+  sslExpiry?: Date;
   upstreams?: CreateUpstreamData[];
   loadBalancer?: LoadBalancerConfigData;
   realIpConfig?: RealIpConfigData;

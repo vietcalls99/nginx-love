@@ -6,6 +6,7 @@ import logger from '../../../utils/logger';
 import { PATHS } from '../../../shared/constants/paths.constants';
 import { DomainWithRelations } from '../domains.types';
 import { cloudflareIpsService } from './cloudflare-ips.service';
+import { DEFAULT_CLIENT_MAX_BODY_SIZE } from '../../../shared/constants/domain.constants';
 
 const execAsync = promisify(exec);
 
@@ -115,6 +116,14 @@ export class NginxConfigService {
       logger.error(`Failed to generate nginx config for ${domain.name}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get client max body size for a domain
+   * Returns the configured value or default if not set
+   */
+  private getClientMaxBodySize(domain: DomainWithRelations): number {
+    return domain.clientMaxBodySize || DEFAULT_CLIENT_MAX_BODY_SIZE;
   }
 
   /**
@@ -234,7 +243,7 @@ ${realIpBlock}
     # Include ACL rules (IP whitelist/blacklist)
     include /etc/nginx/conf.d/acl-rules.conf;
 
-    # Include ACME challenge location for Let's Encrypt
+    # Include ACME challenge location for ZeroSSL/Let's Encrypt
     include /etc/nginx/snippets/acme-challenge.conf;
 
     # Redirect HTTP to HTTPS
@@ -245,6 +254,9 @@ ${realIpBlock}
 
     // Generate Access Lists block
     const accessListsBlock = this.generateAccessListsBlock(domain);
+
+    // Client max body size
+    const clientMaxBodySize = this.getClientMaxBodySize(domain);
 
     // HTTP server with full proxy configuration
     return `
@@ -257,8 +269,11 @@ ${accessListsBlock}
     # Include ACL rules (IP whitelist/blacklist)
     include /etc/nginx/conf.d/acl-rules.conf;
 
-    # Include ACME challenge location for Let's Encrypt
+    # Include ACME challenge location for ZeroSSL/Let's Encrypt
     include /etc/nginx/snippets/acme-challenge.conf;
+
+    # Maximum request body size
+    client_max_body_size ${clientMaxBodySize}M;
 
     ${domain.modsecEnabled ? 'modsecurity on;' : 'modsecurity off;'}
 
@@ -312,6 +327,9 @@ ${accessListsBlock}
     // Generate Access Lists block
     const accessListsBlock = this.generateAccessListsBlock(domain);
 
+    // Client max body size
+    const clientMaxBodySize = this.getClientMaxBodySize(domain);
+
     return `
 server {
     listen 443 ssl${http2Support};
@@ -341,6 +359,9 @@ ${accessListsBlock}
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
+
+    # Maximum request body size
+    client_max_body_size ${clientMaxBodySize}M;
 
     ${domain.modsecEnabled ? 'modsecurity on;' : 'modsecurity off;'}
 

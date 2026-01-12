@@ -11,6 +11,7 @@ export interface ParsedLogEntry {
   message: string;
   domain?: string;
   ip?: string;
+  hostname?: string; // Target hostname/domain from ModSecurity logs
   method?: string;
   path?: string;
   statusCode?: number;
@@ -29,10 +30,13 @@ export interface ParsedLogEntry {
 
 export interface LogFilterOptions {
   limit?: number;
+  offset?: number;
   level?: string;
   type?: string;
   search?: string;
   domain?: string;
+  ruleId?: string;
+  uniqueId?: string;
 }
 
 export interface LogStatistics {
